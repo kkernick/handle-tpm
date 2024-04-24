@@ -9,6 +9,11 @@ depends=(systemd tpm2-tools openssl coreutils bash)
 arch=("any")
 provides=("handle-tpm")
 
+pkgver() {
+	cd $srcdir/handle-tpm
+	git describe --long --tags --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
 package() {
 	cd $srcdir/handle-tpm
 	for binary in *.tpm; do
