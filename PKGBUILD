@@ -11,7 +11,7 @@ provides=("handle-tpm")
 
 pkgver() {
 	cd $srcdir/handle-tpm
-	git describe --long --tags --abbrev=7 | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+	printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
 }
 
 package() {
