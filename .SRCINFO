@@ -1,0 +1,15 @@
+pkgbase = handle-tpm-git
+	pkgdesc = Seal secrets in the TPM
+	pkgver = 2
+	pkgrel = 1
+	arch = any
+	depends = systemd
+	depends = tpm2-tools
+	depends = openssl
+	depends = coreutils
+	depends = bash
+	provides = handle-tpm
+	source = git+https://github.com/kkernick/handle-tpm.git
+	sha256sums = SKIP
+
+pkgname = handle-tpm-git
