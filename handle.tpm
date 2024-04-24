@@ -1,0 +1,153 @@
+#!/bin/bash
+
+error () { echo -e "\e[1;31m${1}\e[0m"; cleanup 1; }
+success () { if [ -n $VERBOSE ]; then echo -e "\e[1;32m${1}\e[0m"; fi; }
+info () { if [ -n $VERBOSE ]; then echo -e "\e[1;33m${1}\e[0m"; fi; }
+
+cleanup () {
+	if test -f session.ctx; then tpm2_flushcontext session.ctx; fi
+	cd ..
+	shred -u .tpm/* >/dev/null 2>&1
+	rmdir .tpm
+	exit $1
+}
+
+help () {
+cat << EOF
+Usage: handle.tpm [-m MODE] [-a ADDRESS] [-i 500000] [-vnph]
+Seal secrets within the TPM
+
+  -m: The function to perform. Can either be seal, unseal, or evict.
+  -a: The address within the TPM to use
+  -i: The iterations to perform when encrypting a secret via openssl (Only if -n defined)
+  -v: Verbose printing
+  -n: Do not use PCR registers for sealing secrets. You must provide a sealing pin instead.
+  -p: Persist the PCRs states instead of randomizing after unsealing (DANGEROUS)
+  -h: Print this message
+
+Examples: 
+  handle.tpm -m seal -a 0x81010010       Seal a secret at address 0x81010010
+  handle.tpm -m unseal -a 0x81010010 -p  Unseal the secret at 0x81010010, persisting the PCR state
+  handle.tpm -m evict -a 0x81010010 -v   Evict the secret at 0x81010010, with verbose information.
+EOF
+exit 0
+}
+
+trap cleanup SIGINT
+
+if [ "$EUID" -ne 0 ]; then error "Run script as root!"; fi
+
+ITERATIONS=500000
+FILE=/dev/stdout
+
+while getopts "m:a:i:vnph" opt; do
+	case $opt in 
+		m)
+			MODE=$OPTARG
+			;;
+		a)
+			ADDRESS=$OPTARG
+			;;
+		i)
+			ITERATIONS=$OPTARG
+			;;
+		v)
+			VERBOSE=true
+			;;
+		n)
+			NO_PCR=true
+			;;
+		p)
+			PERSIST=true
+			;;
+		h)
+			help
+			;;
+		\?)
+			error "Unexpected argument $OPTARG"
+			;;
+	esac
+done
+
+if [ -z $MODE -o -z $ADDRESS ]; then error "Please provide a mode and address"; fi
+
+mkdir -p .tpm
+chmod 700 .tpm
+cd .tpm
+
+tpm2_readpublic -c "$ADDRESS" > /dev/null 2>&1
+VACANT=$?
+if [ $VACANT -eq 1 ]; then info "Address is vacant"; fi
+
+# Handle the commands
+if [ "${MODE}" == "seal" ]; then
+	if [ $VACANT -eq 0 ]; then error "Will not override existing value. Use evict first"; fi
+
+	KEY="0"; VERIFY="1"
+
+	while [ "$KEY" != "$VERIFY" ]; do
+		KEY=$(systemd-ask-password "Enter the secret")
+		VERIFY=$(systemd-ask-password "Repeat")
+	done
+
+	# Create the primary key
+	tpm2_createprimary -Q -C o -c prim.ctx
+
+	if [ -n "$NO_PCR" ]; then
+		info "Without sealing against the PCR, a password must be supplied for security."
+		PIN="0"; VERIFY="1"
+
+		while [ "$PIN" != "$VERIFY" ]; do
+			PIN=$(systemd-ask-password "Add a sealing pin")
+			VERIFY=$(systemd-ask-password "Repeat")
+		done
+
+		PASS=$(echo "$KEY" | openssl aes-256-cbc -e -a -salt -iter $ITERATIONS -pass pass:"$PIN")
+		echo "$PASS" | tpm2_create -Q -g sha256 -u seal.pub -r seal.priv -i- -C prim.ctx
+		tpm2_load -Q -C prim.ctx -u seal.pub -r seal.priv -n seal.name -c seal.ctx
+		tpm2_evictcontrol -C o -c seal.ctx "$ADDRESS"
+
+	else
+		tpm2_startauthsession -S session.ctx
+		tpm2_policypcr -Q -S session.ctx -l sha256:0 -l sha256:7 -L pcr.sha256.policy
+		echo "$KEY" | tpm2_create -Q -g sha256 -u pcr_seal_key.pub -r pcr_seal_key.priv -i- -C prim.ctx -L pcr.sha256.policy
+		tpm2_load -Q -C prim.ctx -u pcr_seal_key.pub -r pcr_seal_key.priv -n pcr_seal_key.name -c pcr_seal_key.ctx
+		tpm2_evictcontrol -c pcr_seal_key.ctx "$ADDRESS" -C o
+	fi
+
+
+elif [ "${MODE}" == "unseal" ]; then
+	if [ $VACANT -eq 1 ]; then error "No value in address"; fi
+	tpm2_startauthsession --policy-session -S session.ctx
+
+	if [ -n "$NO_PCR" ]; then
+		PIN=$(systemd-ask-password "Provide the sealing pin")
+		KEY=$(tpm2_unseal -Q -c "$ADDRESS")
+
+		# Pop up so that if a local path is specified, we don't write to the .tpm
+		cd ..
+		echo "$KEY" | openssl aes-256-cbc -d -a -salt -iter $ITERATIONS -pass pass:"$PIN"
+		cd .tpm 
+
+	else
+		tpm2_policypcr -Q -S session.ctx -l sha256:0 -l sha256:7
+		tpm2_unseal -p session:session.ctx -c "$ADDRESS"
+
+		if [ -z $PERSIST ]; then
+			tpm2_pcrextend 0:sha256=$(openssl rand -hex 32)
+			tpm2_pcrextend 7:sha256=$(openssl rand -hex 32)
+		else info "You are not overwriting the PCRs! The password can be trivially leaked!"
+		fi
+	fi
+
+
+elif [ "${MODE}" == "evict" ]; then
+	if [ $VACANT -eq 1 ]; then error "No value in address"; fi
+	if [ -n "$NO_PCR" ]; then
+		tpm2_startauthsession --policy-session -S session.ctx
+		tpm2_policypcr -Q -S session.ctx -l sha256:0 -l sha256:7 -L pcr0_7.sha256.policy
+	fi
+	tpm2_evictcontrol -C o -c "$ADDRESS"
+fi
+
+cleanup 0
