@@ -1,6 +1,6 @@
 pkgname=handle-tpm-git
 pkgdesc="Seal secrets in the TPM"
-pkgver=r6.b1e6e89
+pkgver=r7.cd8ce0d
 pkgrel=1
 
 source=("git+https://github.com/kkernick/handle-tpm.git")
