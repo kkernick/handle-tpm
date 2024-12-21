@@ -7,8 +7,9 @@ info () { if [ -n $VERBOSE ]; then echo -e "\e[1;33m${1}\e[0m"; fi; }
 cleanup () {
   if test -f session.ctx; then tpm2_flushcontext session.ctx; fi
   cd ..
-  shred -u .tpm/* >/dev/null 2>&1
-  rmdir .tpm
+  shred -u /tmp/.tpm/* >/dev/null 2>&1
+  rmdir /tmp/.tpm
+  cd $OLDDIR
   exit $1
 }
 
@@ -39,6 +40,7 @@ if [ "$EUID" -ne 0 ]; then error "Run script as root!"; fi
 
 ITERATIONS=500000
 FILE=/dev/stdout
+OLDDIR=$PWD
 
 while getopts "m:a:i:vnphs" opt; do
   case $opt in
@@ -72,11 +74,17 @@ while getopts "m:a:i:vnphs" opt; do
   esac
 done
 
+if [ "${MODE}" == "erase" ]; then
+  tpm2_pcrextend 0:sha256=$(openssl rand -hex 32)
+  tpm2_pcrextend 7:sha256=$(openssl rand -hex 32)
+  exit 0
+fi
+
 if [ -z $MODE -o -z $ADDRESS ]; then error "Please provide a mode and address"; fi
 
-mkdir -p .tpm
-chmod 700 .tpm
-cd .tpm
+mkdir -p /tmp/.tpm
+chmod 700 /tmp/.tpm
+cd /tmp/.tpm
 
 tpm2_readpublic -c "$ADDRESS" > /dev/null 2>&1
 VACANT=$?
