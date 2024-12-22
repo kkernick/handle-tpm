@@ -12,13 +12,14 @@ cleanup () {
   shred -u /tmp/.tpm/* >/dev/null 2>&1
   rmdir /tmp/.tpm
   cd $OLDDIR
+  erase
   exit $1
 }
 
 # Print help
 help () {
 cat << EOF
-Usage: handle.tpm [-m MODE] [-a ADDRESS] [-i 500000] [-vnph]
+Usage: handle.tpm [-m MODE] [-a ADDRESS] [-i 500000] [-c CONTEXT] [-vnephs]
 Seal secrets within the TPM
 
   -m: The function to perform. Can either be seal, unseal, or evict.
@@ -29,6 +30,7 @@ Seal secrets within the TPM
   -e: Use both PCR and Pin for a multifactor encryption.
   -p: Persist the PCRs states instead of randomizing after unsealing (DANGEROUS)
   -s: Read from standard input.
+  -c: Provide context as to what is being sealed/unsealed/evicted.
   -h: Print this message
 
 Examples:
@@ -44,7 +46,7 @@ encrypt () {
   PIN="0"; VERIFY="1"
 
   while [ "$PIN" != "$VERIFY" ]; do
-    PIN=$(systemd-ask-password "Add a sealing pin")
+    PIN=$(systemd-ask-password "Add a sealing pin for ${CONTEXT}")
     VERIFY=$(systemd-ask-password "Repeat")
   done
   echo "$1" | openssl aes-256-cbc -e -a -salt -iter $ITERATIONS -pass pass:"$PIN"
@@ -68,6 +70,7 @@ erase () {
 
 # Ensure that cleanup is always performed.
 trap cleanup SIGINT
+trap cleanup SIGTERM
 
 # TPM needs root.
 if [ "$EUID" -ne 0 ]; then error "Run script as root!"; fi
@@ -75,10 +78,11 @@ if [ "$EUID" -ne 0 ]; then error "Run script as root!"; fi
 # These are default values, but they can be changed through the command line arguments.
 ITERATIONS=500000
 FILE=/dev/stdout
+CONTEXT="TPM"
 OLDDIR=$PWD
 
 # Parse args.
-while getopts "m:a:i:vnphse" opt; do
+while getopts "m:a:i:c:vnphse" opt; do
   case $opt in
     m)
       MODE=$OPTARG
@@ -88,6 +92,9 @@ while getopts "m:a:i:vnphse" opt; do
       ;;
     i)
       ITERATIONS=$OPTARG
+      ;;
+    c)
+      CONTEXT=$OPTARG
       ;;
     v)
       VERBOSE=true
@@ -143,7 +150,7 @@ if [ "${MODE}" == "seal" ]; then
       KEY=$(cat)
       VERIFY=$KEY
     else
-      KEY=$(systemd-ask-password "Enter the secret")
+      KEY=$(systemd-ask-password "Enter the secret for ${CONTEXT}")
       VERIFY=$(systemd-ask-password "Repeat")
     fi
   done
@@ -153,7 +160,7 @@ if [ "${MODE}" == "seal" ]; then
 
   # NO_PCR needs a sealing pin, otherwise it could be trivially decrypted.
   if [ -n "$NO_PCR" ]; then
-    info "Without sealing against the PCR, a password must be supplied for security."
+    info "Without sealing against the PCR, a password must be supplied for security for ${CONTEXT}"
     encrypt $KEY | tpm2_create -Q -g sha256 -u seal.pub -r seal.priv -i- -C prim.ctx
     tpm2_load -Q -C prim.ctx -u seal.pub -r seal.priv -n seal.name -c seal.ctx
     tpm2_evictcontrol -C o -c seal.ctx "$ADDRESS"
@@ -186,7 +193,7 @@ elif [ "${MODE}" == "unseal" ]; then
     if [ -n "$IN" ]; then
       PIN=$(cat)
     else
-      PIN=$(systemd-ask-password "Provide the sealing pin")
+      PIN=$(systemd-ask-password "Provide the sealing pin for ${CONTEXT}")
     fi
 
     # NO_PCR just unseals it directly, whereas ENHANCED creates a PCR Policy session.
