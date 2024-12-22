@@ -161,7 +161,7 @@ if [ "${MODE}" == "seal" ]; then
   # NO_PCR needs a sealing pin, otherwise it could be trivially decrypted.
   if [ -n "$NO_PCR" ]; then
     info "Without sealing against the PCR, a password must be supplied for security for ${CONTEXT}"
-    encrypt $KEY | tpm2_create -Q -g sha256 -u seal.pub -r seal.priv -i- -C prim.ctx
+    encrypt "${KEY}" | tpm2_create -Q -g sha256 -u seal.pub -r seal.priv -i- -C prim.ctx
     tpm2_load -Q -C prim.ctx -u seal.pub -r seal.priv -n seal.name -c seal.ctx
     tpm2_evictcontrol -C o -c seal.ctx "$ADDRESS"
 
@@ -171,11 +171,11 @@ if [ "${MODE}" == "seal" ]; then
 
     # Enhanced just adds a PIN on top. So the stored secret is encrypted by a key.
     if [ -n "$ENHANCED" ]; then
-      encrypt $KEY | tpm2_create -Q -g sha256 -u pcr_seal_key.pub -r pcr_seal_key.priv -i- -C prim.ctx -L pcr.sha256.policy
+    encrypt "${KEY}" | tpm2_create -Q -g sha256 -u pcr_seal_key.pub -r pcr_seal_key.priv -i- -C prim.ctx -L pcr.sha256.policy
 
     # Regular just seals the pin as-is (TPM does encryption to, but transparently)
     else
-      echo "$KEY" | tpm2_create -Q -g sha256 -u pcr_seal_key.pub -r pcr_seal_key.priv -i- -C prim.ctx -L pcr.sha256.policy
+        echo "${KEY}" | tpm2_create -Q -g sha256 -u pcr_seal_key.pub -r pcr_seal_key.priv -i- -C prim.ctx -L pcr.sha256.policy
     fi
 
     tpm2_load -Q -C prim.ctx -u pcr_seal_key.pub -r pcr_seal_key.priv -n pcr_seal_key.name -c pcr_seal_key.ctx
