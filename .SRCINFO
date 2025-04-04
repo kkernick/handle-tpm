@@ -1,6 +1,6 @@
 pkgbase = handle-tpm-git
 	pkgdesc = Seal secrets in the TPM
-	pkgver = r7.cd8ce0d
+	pkgver = r13.9534805
 	pkgrel = 1
 	arch = any
 	depends = systemd

@@ -62,8 +62,9 @@ decrypt () {
 # Erase the PCR values so values can no longer be retrieved.
 erase () {
   if [ -z $PERSIST ]; then
-    tpm2_pcrextend 0:sha256=$(openssl rand -hex 32)
-    tpm2_pcrextend 7:sha256=$(openssl rand -hex 32)
+    
+    tpm2_pcrextend 0:sha256=$(tpm2_pcrread sha256:0 | sha256sum | awk '{print $1}')
+    tpm2_pcrextend 7:sha256=$(tpm2_pcrread sha256:7 | sha256sum | awk '{print $1}')
   else info "You are not overwriting the PCRs! The password can be trivially leaked!"
   fi
 }
