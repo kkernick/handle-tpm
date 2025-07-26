@@ -9,8 +9,8 @@ info () { if [ -n $VERBOSE ]; then echo -e "\e[1;33m${1}\e[0m"; fi; }
 cleanup () {
   if test -f session.ctx; then tpm2_flushcontext session.ctx; fi
   cd ..
-  shred -u /tmp/.tpm/* >/dev/null 2>&1
-  rmdir /tmp/.tpm
+  shred -u "${TEMP}/.tpm/*" >/dev/null 2>&1
+  rm -r "${TEMP}"
   cd $OLDDIR
   erase
   exit $1
@@ -62,7 +62,7 @@ decrypt () {
 # Erase the PCR values so values can no longer be retrieved.
 erase () {
   if [ -z $PERSIST ]; then
-    
+
     tpm2_pcrextend 0:sha256=$(tpm2_pcrread sha256:0 | sha256sum | awk '{print $1}')
     tpm2_pcrextend 7:sha256=$(tpm2_pcrread sha256:7 | sha256sum | awk '{print $1}')
   else info "You are not overwriting the PCRs! The password can be trivially leaked!"
@@ -131,9 +131,10 @@ fi
 if [ -z $MODE -o -z $ADDRESS ]; then error "Please provide a mode and address"; fi
 
 # Make a temporary directory for storing context.
-mkdir -p /tmp/.tpm
-chmod 700 /tmp/.tpm
-cd /tmp/.tpm
+TEMP=$(mktemp -d)
+mkdir "${TEMP}/.tpm"
+chmod 700 "${TEMP}/.tpm"
+cd "${TEMP}/.tpm"
 
 # We don't want to let users overwrite existing information. They need to evict it first.
 tpm2_readpublic -c "$ADDRESS" > /dev/null 2>&1
